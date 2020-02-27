@@ -28,6 +28,7 @@ function [Error]=DPARSFA_run(AutoDataProcessParameter,WorkingDir,SubjectListFile
 % Modified by YAN Chao-Gan, 130303. DPARSF V2.2, minor revision.
 % Modified by YAN Chao-Gan, 130615. DPARSF V2.3.
 % Modified by YAN Chao-Gan, 161006. For compiling.
+% Modified by YAN Chao-Gan, 191121. Calling dcm2niix for BIDS format. Change searching c* to *Crop*
 
 
 if ischar(AutoDataProcessParameter)  %If inputed a .mat file name. (Cfg inside)
@@ -94,6 +95,17 @@ end
 if ~isfield(AutoDataProcessParameter,'IsNeedConvertFunDCM2IMG')
     AutoDataProcessParameter.IsNeedConvertFunDCM2IMG=0; 
 end
+if ~isfield(AutoDataProcessParameter,'IsNeedConvertT1DCM2IMG')
+    AutoDataProcessParameter.IsNeedConvertT1DCM2IMG=0; 
+end
+
+if ~isfield(AutoDataProcessParameter,'IsBIDStoDPARSF')
+    AutoDataProcessParameter.IsBIDStoDPARSF=0;
+elseif AutoDataProcessParameter.IsBIDStoDPARSF==1
+    UseNoCoT1Image=1; %Prevent the dialog asking confirm use no co t1 images.
+end
+
+
 if ~isfield(AutoDataProcessParameter,'IsApplyDownloadedReorientMats')
     AutoDataProcessParameter.IsApplyDownloadedReorientMats=0;
 end
@@ -115,9 +127,7 @@ end
 if ~isfield(AutoDataProcessParameter,'IsNeedReorientFunImgInteractively')
     AutoDataProcessParameter.IsNeedReorientFunImgInteractively=0; 
 end
-if ~isfield(AutoDataProcessParameter,'IsNeedConvertT1DCM2IMG')
-    AutoDataProcessParameter.IsNeedConvertT1DCM2IMG=0; 
-end
+
 % if ~isfield(AutoDataProcessParameter,'IsNeedUnzipT1IntoT1Img')
 %     AutoDataProcessParameter.IsNeedUnzipT1IntoT1Img=0; 
 % end
@@ -286,7 +296,38 @@ if (AutoDataProcessParameter.IsNeedConvertT1DCM2IMG==1)
     fprintf('\n');
 end
 
+%Convert FieldMap DICOM files to NIFTI images. YAN Chao-Gan, 191122.
+if isfield(AutoDataProcessParameter,'FieldMap')
+    if (AutoDataProcessParameter.FieldMap.IsNeedConvertDCM2IMG==1)
+        FieldMapMeasures={'PhaseDiff','Magnitude1','Magnitude2','Phase1','Phase2'};
+        for iFieldMapMeasure=1:length(FieldMapMeasures)
+            if exist([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,FieldMapMeasures{iFieldMapMeasure},'Raw'])
+                cd([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,FieldMapMeasures{iFieldMapMeasure},'Raw']);
+                for i=1:AutoDataProcessParameter.SubjectNum
+                    OutputDir=[AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,FieldMapMeasures{iFieldMapMeasure},'Img',filesep,AutoDataProcessParameter.SubjectID{i}];
+                    mkdir(OutputDir);
+                    DirDCM=dir([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,FieldMapMeasures{iFieldMapMeasure},'Raw',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*']); %Revised by YAN Chao-Gan 100130. %DirDCM=dir([AutoDataProcessParameter.DataProcessDir,filesep,'T1Raw',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.*']);
+                    if strcmpi(DirDCM(3).name,'.DS_Store')  %110908 YAN Chao-Gan, for MAC OS compatablie
+                        StartIndex=4;
+                    else
+                        StartIndex=3;
+                    end
+                    InputFilename=[AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,FieldMapMeasures{iFieldMapMeasure},'Raw',filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirDCM(StartIndex).name];
+                    y_Call_dcm2nii(InputFilename, OutputDir, 'DefaultINI');
+                    fprintf(['Converting FieldMap ',FieldMapMeasures{iFieldMapMeasure},' Images:',AutoDataProcessParameter.SubjectID{i},' OK']);
+                end
+                fprintf('\n');
+            end
+        end
+    end
+end
 
+
+%YAN Chao-Gan, 200214. BIDS compatible.
+if (AutoDataProcessParameter.IsBIDStoDPARSF==1)
+    y_Convert_BIDS2DPARSF([AutoDataProcessParameter.DataProcessDir,filesep,'BIDS'],AutoDataProcessParameter.DataProcessDir,AutoDataProcessParameter.SubjectID);
+    AutoDataProcessParameter.StartingDirName='FunImg';   %Now start with FunImg directory.
+end
 
 
 %Reorient and Crop T1Img by using Chris Rorden's dcm2nii
@@ -369,6 +410,9 @@ if (AutoDataProcessParameter.IsApplyDownloadedReorientMats==1)
                 delete(DirCo(1).name);
             end
             DirCo=dir('c*.nii');  %YAN Chao-Gan, 111114. Also support .nii files.
+            if isempty(DirCo)
+                DirCo=dir('*Crop*.nii');  %YAN Chao-Gan, 191121. Support BIDS format.
+            end
         end
         if isempty(DirCo)
             DirImg=dir('*.img');
@@ -423,6 +467,9 @@ if (AutoDataProcessParameter.IsApplyDownloadedReorientMats==1)
                         delete([AutoDataProcessParameter.DataProcessDir,filesep,'T1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirT1Img(1).name]);
                     end
                     DirT1Img=dir([AutoDataProcessParameter.DataProcessDir,filesep,'T1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'c*.nii']);
+                    if isempty(DirT1Img)
+                        DirT1Img=dir([AutoDataProcessParameter.DataProcessDir,filesep,'T1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*Crop*.nii']); %YAN Chao-Gan, 191121. Calling dcm2niix for BIDS format. Change searching c* to *Crop*
+                    end
                 end
             else
                 DirT1Img=dir([AutoDataProcessParameter.DataProcessDir,filesep,'T1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.img']);
@@ -493,7 +540,7 @@ if isfield(AutoDataProcessParameter,'TR')
                 nTimePoints = zeros(AutoDataProcessParameter.SubjectNum,AutoDataProcessParameter.FunctionalSessionNumber);
                 VoxelSize = zeros(AutoDataProcessParameter.SubjectNum,AutoDataProcessParameter.FunctionalSessionNumber,3);
                 for iFunSession=1:AutoDataProcessParameter.FunctionalSessionNumber
-                    parfor i=1:AutoDataProcessParameter.SubjectNum
+                    for i=1:AutoDataProcessParameter.SubjectNum
                         cd([AutoDataProcessParameter.DataProcessDir,filesep,FunSessionPrefixSet{iFunSession},AutoDataProcessParameter.StartingDirName,filesep,AutoDataProcessParameter.SubjectID{i}]);
                         DirImg=dir('*.img');
                         if isempty(DirImg)  %YAN Chao-Gan, 111114. Also support .nii files. % Either in .nii.gz or in .nii
@@ -672,6 +719,7 @@ if (AutoDataProcessParameter.IsSliceTiming==1)
                 SliceNumber = size(Nii.dat,3);
                 SPMJOB.matlabbatch{1,1}.spm.temporal.st.nslices = SliceNumber;
                 
+                DirJSON=dir([AutoDataProcessParameter.DataProcessDir,filesep,FunSessionPrefixSet{iFunSession},AutoDataProcessParameter.StartingDirName,filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.json']);
                 if exist([AutoDataProcessParameter.DataProcessDir,filesep,'SliceOrderInfo.tsv'],'file')==2 % YAN Chao-Gan, 130524. Read the slice timing information from a tsv file (Tab-separated values)
                     
                     fid = fopen([AutoDataProcessParameter.DataProcessDir,filesep,'SliceOrderInfo.tsv']);
@@ -710,9 +758,14 @@ if (AutoDataProcessParameter.IsSliceTiming==1)
                     end;
                     
                     SPMJOB.matlabbatch{1,1}.spm.temporal.st.so = SliceOrder;
-                    
+                    fprintf(['Using slice timing information from SliceOrderInfo.tsv: ',AutoDataProcessParameter.SubjectID{i},'.\n']);
+                elseif ~isempty(DirJSON) %Use the slice timing information from DICOM BIDS information. %YAN Chao-Gan, 191122.
+                    JSON=spm_jsonread([AutoDataProcessParameter.DataProcessDir,filesep,FunSessionPrefixSet{iFunSession},AutoDataProcessParameter.StartingDirName,filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirJSON(1).name]);
+                    SPMJOB.matlabbatch{1,1}.spm.temporal.st.so = JSON.SliceTiming;
+                    fprintf(['Using slice timing information from DICOM BIDS information: ',AutoDataProcessParameter.SubjectID{i},'.\n']);
                 else
                     SPMJOB.matlabbatch{1,1}.spm.temporal.st.so = [1:2:SliceNumber,2:2:SliceNumber];
+                    fprintf(['BE CAUTIONS: Using slice order as [1:2:SliceNumber,2:2:SliceNumber]: ',AutoDataProcessParameter.SubjectID{i},'.\n']);
                 end
                 SPMJOB.matlabbatch{1,1}.spm.temporal.st.refslice = SPMJOB.matlabbatch{1,1}.spm.temporal.st.so(ceil(SliceNumber/2));
                 
@@ -752,16 +805,107 @@ if ~isempty(Error)
 end
 
 
+
+%Calculate VDM for FieldMap Correction %YAN Chao-Gan 191122.
+if isfield(AutoDataProcessParameter,'FieldMap')
+    if (AutoDataProcessParameter.FieldMap.IsCalculateVDM==1)
+        parfor i=1:AutoDataProcessParameter.SubjectNum
+            SPMJOB = load([ProgramPath,filesep,'Jobmats',filesep,'FieldMapCalculateVDM.mat']);
+            SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.data=[];
+            if strcmpi(AutoDataProcessParameter.FieldMap.DataFormat,'PhaseDiffMagnitude')
+                DirImg=dir([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'PhaseDiffImg',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.nii']);
+                File=[AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'PhaseDiffImg',filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirImg(1).name];
+                SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.data.presubphasemag.phase={File};
+                DirImg=dir([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Magnitude1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.nii']);
+                File=[AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Magnitude1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirImg(1).name];
+                SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.data.presubphasemag.magnitude={File};
+            else 
+                DirImg=dir([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Phase1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.nii']);
+                File=[AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Phase1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirImg(1).name];
+                SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.data.phasemag.shortphase={File};
+                DirImg=dir([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Phase2Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.nii']);
+                File=[AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Phase2Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirImg(1).name];
+                SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.data.phasemag.longphase={File};
+                DirImg=dir([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Magnitude1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.nii']);
+                File=[AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Magnitude1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirImg(1).name];
+                SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.data.phasemag.shortmag={File};
+                DirImg=dir([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Magnitude2Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.nii']);
+                File=[AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Magnitude2Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirImg(1).name];
+                SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.data.phasemag.longmag={File};
+            end
+            
+            if AutoDataProcessParameter.FieldMap.TE1==0
+                DirJSON=dir([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Magnitude1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.json']);
+                JSON=spm_jsonread([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Magnitude1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirJSON(1).name]);
+                TE1 = JSON.EchoTime*1000;
+            else
+                TE1 = AutoDataProcessParameter.FieldMap.TE1;
+            end
+            if AutoDataProcessParameter.FieldMap.TE2==0
+                DirJSON=dir([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Magnitude2Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.json']);
+                JSON=spm_jsonread([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Magnitude2Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirJSON(1).name]);
+                TE2 = JSON.EchoTime*1000;
+            else
+                TE2 = AutoDataProcessParameter.FieldMap.TE2;
+            end
+            SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.defaults.defaultsval.et=[TE1,TE2];
+            SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.defaults.defaultsval.maskbrain=0;
+            DirJSON=dir([AutoDataProcessParameter.DataProcessDir,filesep,'FunImg',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.json']);
+            JSON=spm_jsonread([AutoDataProcessParameter.DataProcessDir,filesep,'FunImg',filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirJSON(1).name]);
+            if isempty(strfind(JSON.PhaseEncodingDirection,'-'))
+                SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.defaults.defaultsval.blipdir=1;
+            else
+                SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.defaults.defaultsval.blipdir=-1;
+            end
+            SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.defaults.defaultsval.tert=JSON.EffectiveEchoSpacing*JSON.ReconMatrixPE*1000;
+            SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.defaults.defaultsval.epifm=AutoDataProcessParameter.FieldMap.EPIBasedFieldMap;
+            SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.defaults.defaultsval.ajm=0;
+            SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.defaults.defaultsval.mflags.template={fullfile(spm('Dir'),'toolbox','FieldMap','T1.nii')};
+            
+            DirImg=dir([AutoDataProcessParameter.DataProcessDir,filesep,AutoDataProcessParameter.StartingDirName,filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.nii']);
+            File=[AutoDataProcessParameter.DataProcessDir,filesep,AutoDataProcessParameter.StartingDirName,filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirImg(1).name];
+            SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.session.epi={[File,',1']};
+            
+            SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.matchvdm=1;
+            SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.writeunwarped=0;
+            SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.anat='';
+            SPMJOB.matlabbatch{1,1}.spm.tools.fieldmap.calculatevdm.subj.matchanat=0;
+            
+            fprintf(['Calculate VDM for FieldMap Correction Setup:',AutoDataProcessParameter.SubjectID{i},' OK\n']);
+            spm_jobman('run',SPMJOB.matlabbatch);
+            
+            %Clean the intermediate files
+            delete([AutoDataProcessParameter.DataProcessDir,filesep,AutoDataProcessParameter.StartingDirName,filesep,AutoDataProcessParameter.SubjectID{i},filesep,'u',DirImg(1).name]);
+            delete([AutoDataProcessParameter.DataProcessDir,filesep,AutoDataProcessParameter.StartingDirName,filesep,AutoDataProcessParameter.SubjectID{i},filesep,'wfmag_',DirImg(1).name]);
+        end
+        
+        %Move the VDM files
+        for i=1:AutoDataProcessParameter.SubjectNum
+            mkdir([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'VDMImg',filesep,AutoDataProcessParameter.SubjectID{i}])
+            if strcmpi(AutoDataProcessParameter.FieldMap.DataFormat,'PhaseDiffMagnitude')
+                movefile([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'PhaseDiffImg',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'vdm*'],[AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'VDMImg',filesep,AutoDataProcessParameter.SubjectID{i}])
+            else
+               movefile([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'Phase1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'vdm*'],[AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'VDMImg',filesep,AutoDataProcessParameter.SubjectID{i}])
+            end
+        end
+    end
+end
+
+
+
 %Realign
 if (AutoDataProcessParameter.IsRealign==1)
     parfor i=1:AutoDataProcessParameter.SubjectNum
-        SPMJOB = load([ProgramPath,filesep,'Jobmats',filesep,'Realign.mat']);
+        if isfield(AutoDataProcessParameter,'FieldMap') && AutoDataProcessParameter.FieldMap.IsFieldMapCorrectionUnwarpRealign
+            SPMJOB = load([ProgramPath,filesep,'Jobmats',filesep,'RealignUnwarp.mat']);
+        else
+            SPMJOB = load([ProgramPath,filesep,'Jobmats',filesep,'Realign.mat']);
+        end
 
         for iFunSession=1:AutoDataProcessParameter.FunctionalSessionNumber
             cd([AutoDataProcessParameter.DataProcessDir,filesep,FunSessionPrefixSet{iFunSession},AutoDataProcessParameter.StartingDirName,filesep,AutoDataProcessParameter.SubjectID{i}]);
             DirImg=dir('*.img');
-            
-            
+
             if isempty(DirImg)  %YAN Chao-Gan, 111114. Also support .nii files. % Either in .nii.gz or in .nii
                 DirImg=dir('*.nii.gz');  % Search .nii.gz and unzip; YAN Chao-Gan, 120806.
                 if length(DirImg)==1
@@ -789,9 +933,15 @@ if (AutoDataProcessParameter.IsRealign==1)
                     FileList=[FileList;{[AutoDataProcessParameter.DataProcessDir,filesep,FunSessionPrefixSet{iFunSession},AutoDataProcessParameter.StartingDirName,filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirImg(1).name,',',num2str(j)]}];
                 end
             end
-            
-            
-            SPMJOB.matlabbatch{1,1}.spm.spatial.realign.estwrite.data{1,iFunSession}=FileList;
+
+            if isfield(AutoDataProcessParameter,'FieldMap') && AutoDataProcessParameter.FieldMap.IsFieldMapCorrectionUnwarpRealign %YAN Chao-Gan, 191122. Field Map Correction.
+                SPMJOB.matlabbatch{1, 1}.spm.spatial.realignunwarp.data(iFunSession).scans=FileList;
+                VDMFile=dir([AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'VDMImg',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'vdm*']);
+                VDMFile=[AutoDataProcessParameter.DataProcessDir,filesep,'FieldMap',filesep,'VDMImg',filesep,AutoDataProcessParameter.SubjectID{i},filesep,VDMFile(1).name];
+                SPMJOB.matlabbatch{1, 1}.spm.spatial.realignunwarp.data(iFunSession).pmscan={VDMFile};
+            else
+                SPMJOB.matlabbatch{1,1}.spm.spatial.realign.estwrite.data{1,iFunSession}=FileList;
+            end
         end
 
         fprintf(['Realign Setup:',AutoDataProcessParameter.SubjectID{i},' OK\n']);
@@ -1014,6 +1164,9 @@ if (AutoDataProcessParameter.IsNeedReorientT1ImgInteractively==1) && (7==exist([
                 delete(DirCo(1).name);
             end
             DirCo=dir('c*.nii');  %YAN Chao-Gan, 111114. Also support .nii files.
+            if isempty(DirCo)
+                DirCo=dir('*Crop*.nii');  %YAN Chao-Gan, 191121. Support BIDS format.
+            end
         end
         if isempty(DirCo)
             DirImg=dir('*.img');
@@ -1061,6 +1214,9 @@ if (AutoDataProcessParameter.IsNeedReorientT1ImgInteractively==1) && (7==exist([
                     delete([AutoDataProcessParameter.DataProcessDir,filesep,'T1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,DirT1Img(1).name]);
                 end
                 DirT1Img=dir([AutoDataProcessParameter.DataProcessDir,filesep,'T1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'c*.nii']);
+                if isempty(DirT1Img)
+                    DirT1Img=dir([AutoDataProcessParameter.DataProcessDir,filesep,'T1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*Crop*.nii']); %YAN Chao-Gan, 191121. Calling dcm2niix for BIDS format. Change searching c* to *Crop*
+                end
             end
         else
             DirT1Img=dir([AutoDataProcessParameter.DataProcessDir,filesep,'T1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*.img']);
@@ -1388,6 +1544,9 @@ if (AutoDataProcessParameter.IsBet==1)
                     delete(DirCo(1).name);
                 end
                 DirCo=dir('c*.nii');  %YAN Chao-Gan, 111114. Also support .nii files.
+                if isempty(DirCo)
+                    DirCo=dir('*Crop*.nii');  %YAN Chao-Gan, 191121. Support BIDS format.
+                end
             end
             if isempty(DirCo)
                 DirImg=dir('*.img');
@@ -1429,6 +1588,9 @@ if (AutoDataProcessParameter.IsBet==1)
                 end
                 if isempty(DirImg)
                     DirImg=dir([AutoDataProcessParameter.DataProcessDir,filesep,'T1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'c*.nii']);
+                end
+                if isempty(DirImg)
+                    DirImg=dir([AutoDataProcessParameter.DataProcessDir,filesep,'T1Img',filesep,AutoDataProcessParameter.SubjectID{i},filesep,'*Crop*.nii']); %YAN Chao-Gan, 191121. Calling dcm2niix for BIDS format. Change searching c* to *Crop*
                 end
             else
                 %Search the T1 file - then any possible file
@@ -1493,6 +1655,9 @@ if (AutoDataProcessParameter.IsNeedT1CoregisterToFun==1)
                 delete(DirCo(1).name);
             end
             DirCo=dir('c*.nii');  %YAN Chao-Gan, 111114. Also support .nii files.
+            if isempty(DirCo)
+                DirCo=dir('*Crop*.nii');  %YAN Chao-Gan, 191121. Support BIDS format.
+            end
         end
         if isempty(DirCo)
             DirImg=dir('*.img');
@@ -1540,7 +1705,12 @@ if (AutoDataProcessParameter.IsNeedT1CoregisterToFun==1)
                     gunzip(DirImg(1).name);
                     delete(DirImg(1).name);
                 end
-                copyfile('c*.nii',[AutoDataProcessParameter.DataProcessDir,filesep,'T1ImgCoreg',filesep,AutoDataProcessParameter.SubjectID{i}])
+                DirImg=dir('c*.nii');
+                if ~isempty(DirImg)
+                    copyfile('c*.nii',[AutoDataProcessParameter.DataProcessDir,filesep,'T1ImgCoreg',filesep,AutoDataProcessParameter.SubjectID{i}])
+                else
+                    copyfile('*Crop*.nii',[AutoDataProcessParameter.DataProcessDir,filesep,'T1ImgCoreg',filesep,AutoDataProcessParameter.SubjectID{i}])
+                end
             end
         else
             DirImg=dir('*.img');
@@ -1892,6 +2062,10 @@ if (AutoDataProcessParameter.IsSegment>=1)
                     delete(DirCo(1).name);
                 end
                 DirCo=dir('c*.nii');  %YAN Chao-Gan, 111114. Also support .nii files.
+                if isempty(DirCo)
+                    DirCo=dir('*Crop*.nii');  %YAN Chao-Gan, 191121. Support BIDS format.
+                end
+                
             end
             if isempty(DirCo)
                 DirImg=dir('*.img');
@@ -1939,7 +2113,13 @@ if (AutoDataProcessParameter.IsSegment>=1)
                         gunzip(DirImg(1).name);
                         delete(DirImg(1).name);
                     end
-                    copyfile('c*.nii',[AutoDataProcessParameter.DataProcessDir,filesep,T1ImgSegmentDirectoryName,filesep,AutoDataProcessParameter.SubjectID{i}])
+                    
+                    DirImg=dir('c*.nii');
+                    if ~isempty(DirImg)
+                        copyfile('c*.nii',[AutoDataProcessParameter.DataProcessDir,filesep,T1ImgSegmentDirectoryName,filesep,AutoDataProcessParameter.SubjectID{i}])
+                    else
+                        copyfile('*Crop*.nii',[AutoDataProcessParameter.DataProcessDir,filesep,T1ImgSegmentDirectoryName,filesep,AutoDataProcessParameter.SubjectID{i}])
+                    end
                 end
             else
                 DirImg=dir('*.img');

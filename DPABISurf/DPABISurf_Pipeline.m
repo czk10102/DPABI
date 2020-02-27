@@ -22,7 +22,7 @@ function varargout = DPABISurf_Pipeline(varargin)
 
 % Edit the above text to modify the response to help DPABISurf_Pipeline
 
-% Last Modified by GUIDE v2.5 21-Jan-2019 21:24:52
+% Last Modified by GUIDE v2.5 25-Feb-2020 16:52:20
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 1;
@@ -2065,7 +2065,7 @@ function [handles, CheckingPass]=CheckCfgParametersBeforeRun(handles)
             end
             
             if (handles.Cfg.TimePoints)>0 && ~strcmpi(handles.Cfg.StartingDirName,'fmriprep') % If the number of time points is not set at 0, then check the number of time points.
-                if ~(strcmpi(handles.Cfg.StartingDirName,'T1Raw') || strcmpi(handles.Cfg.StartingDirName,'T1Img') || strcmpi(handles.Cfg.StartingDirName,'T1NiiGZ') ) %If not just use for VBM, check if the time points right. %YAN Chao-Gan, 111130. Also add T1 .nii.gz support.
+                if ~(strcmpi(handles.Cfg.StartingDirName,'T1Raw') || strcmpi(handles.Cfg.StartingDirName,'T1Img') || strcmpi(handles.Cfg.StartingDirName,'T1NiiGZ') || strcmpi(handles.Cfg.StartingDirName,'BIDS') ) %If not just use for VBM, check if the time points right. %YAN Chao-Gan, 111130. Also add T1 .nii.gz support.
                     
                     if ~(strcmpi(handles.Cfg.StartingDirName,'FunImg'))
                         DirImg=dir([handles.Cfg.WorkingDir,filesep,handles.Cfg.StartingDirName,filesep,handles.Cfg.SubjectID{1},filesep,'*.gii']);
@@ -2200,3 +2200,34 @@ set(handles.editParallelWorker,'String',handles.Cfg.ParallelWorkersNumber);
 set(handles.editFuncSession,'String',handles.Cfg.FunctionalSessionNumber);
 set(handles.editStartingDirName,'String',handles.Cfg.StartingDirName);
 
+
+% --- Executes on button press in pushbuttonFieldMap.
+function pushbuttonFieldMap_Callback(hObject, eventdata, handles)
+% hObject    handle to pushbuttonFieldMap (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+uiwait(msgbox({'';...
+    'If you want to perform FieldMap Correction, you need to arrange each subject''s FileMap DICOM files in one directory, and then put them in "FieldMap" directory under the working directory. i.e.:';...
+    '{Working Directory}\FieldMap\PhaseDiffRaw\Subject001\xxxxx001.dcm';...
+    '{Working Directory}\FieldMap\PhaseDiffRaw\Subject001\xxxxx002.dcm';...
+    '...';...
+    '{Working Directory}\FieldMap\PhaseDiffRaw\Subject002\xxxxx001.dcm';...
+    '{Working Directory}\FieldMap\PhaseDiffRaw\Subject002\xxxxx002.dcm';...
+    '...';...
+    '{Working Directory}\FieldMap\Magnitude1Raw\Subject001\xxxxx001.dcm';...
+    '{Working Directory}\FieldMap\Magnitude1Raw\Subject001\xxxxx002.dcm';...
+    '...';...
+    '{Working Directory}\FieldMap\Magnitude1Raw\Subject002\xxxxx001.dcm';...
+    '{Working Directory}\FieldMap\Magnitude1Raw\Subject002\xxxxx002.dcm';...
+    '...';...
+    '...';...
+    },'FieldMap Correction'));
+
+if isfield(handles.Cfg,'FieldMap')
+    handles.Cfg.FieldMap = DPABISurf_FieldMap(handles.Cfg.FieldMap);
+else
+    handles.Cfg.FieldMap = DPABISurf_FieldMap;
+end
+guidata(hObject, handles);
+UpdateDisplay(handles);
